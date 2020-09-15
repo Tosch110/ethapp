@@ -9,7 +9,8 @@ import (
 	"github.com/cosmos/cosmos-sdk/client/flags"
 	"github.com/cosmos/cosmos-sdk/client/keys"
 	"github.com/cosmos/cosmos-sdk/client/lcd"
-	"github.com/cosmos/cosmos-sdk/client/rpc"
+
+	clientrpc "github.com/cosmos/cosmos-sdk/client/rpc"
 	"github.com/cosmos/cosmos-sdk/version"
 	"github.com/cosmos/cosmos-sdk/x/auth"
 	authcmd "github.com/cosmos/cosmos-sdk/x/auth/client/cli"
@@ -24,7 +25,8 @@ import (
 	"github.com/tendermint/tendermint/libs/cli"
 
 	"github.com/tosch110/ethapp/app"
-  // this line is used by starport scaffolding
+	// this line is used by starport scaffolding
+	ethrpc "github.com/cosmos/ethermint/rpc"
 )
 
 func main() {
@@ -53,11 +55,12 @@ func main() {
 
 	// Construct Root Command
 	rootCmd.AddCommand(
-		rpc.StatusCommand(),
+		clientrpc.StatusCommand(),
 		client.ConfigCmd(app.DefaultCLIHome),
 		queryCmd(cdc),
 		txCmd(cdc),
 		flags.LineBreak,
+		ethrpc.EmintServeCmd(cdc),
 		lcd.ServeCommand(cdc, registerRoutes),
 		flags.LineBreak,
 		keys.Commands(),
@@ -67,7 +70,7 @@ func main() {
 	)
 
 	// Add flags and prefix all env exposed with AA
-	executor := cli.PrepareMainCmd(rootCmd, "AA", app.DefaultCLIHome)
+	executor := cli.PrepareMainCmd(rootCmd, "EM", app.DefaultCLIHome)
 
 	err := executor.Execute()
 	if err != nil {
@@ -86,8 +89,8 @@ func queryCmd(cdc *amino.Codec) *cobra.Command {
 	queryCmd.AddCommand(
 		authcmd.GetAccountCmd(cdc),
 		flags.LineBreak,
-		rpc.ValidatorCommand(cdc),
-		rpc.BlockCommand(),
+		clientrpc.ValidatorCommand(cdc),
+		clientrpc.BlockCommand(),
 		authcmd.QueryTxsByEventsCmd(cdc),
 		authcmd.QueryTxCmd(cdc),
 		flags.LineBreak,
@@ -141,7 +144,7 @@ func registerRoutes(rs *lcd.RestServer) {
 	client.RegisterRoutes(rs.CliCtx, rs.Mux)
 	authrest.RegisterTxRoutes(rs.CliCtx, rs.Mux)
 	app.ModuleBasics.RegisterRESTRoutes(rs.CliCtx, rs.Mux)
-  // this line is used by starport scaffolding # 2
+	// this line is used by starport scaffolding # 2
 }
 
 func initConfig(cmd *cobra.Command) error {

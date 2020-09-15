@@ -25,15 +25,20 @@ import (
 	"github.com/tosch110/ethapp/x/ethapp"
 	ethappkeeper "github.com/tosch110/ethapp/x/ethapp/keeper"
 	ethapptypes "github.com/tosch110/ethapp/x/ethapp/types"
-  // this line is used by starport scaffolding
+
+	// These lines are Ethermint additions
+
+	"github.com/cosmos/ethermint/app/ante"
+	"github.com/cosmos/ethermint/x/evm"
+	// this line is used by starport scaffolding
 )
 
 const appName = "ethapp"
 
 var (
-	DefaultCLIHome = os.ExpandEnv("$HOME/.ethappcli")
+	DefaultCLIHome  = os.ExpandEnv("$HOME/.ethappcli")
 	DefaultNodeHome = os.ExpandEnv("$HOME/.ethappd")
-	ModuleBasics = module.NewBasicManager(
+	ModuleBasics    = module.NewBasicManager(
 		genutil.AppModuleBasic{},
 		auth.AppModuleBasic{},
 		bank.AppModuleBasic{},
@@ -41,7 +46,9 @@ var (
 		params.AppModuleBasic{},
 		supply.AppModuleBasic{},
 		ethapp.AppModuleBasic{},
-    // this line is used by starport scaffolding # 2
+		// this line is for Ethermint
+		evm.AppModuleBasic{},
+		// this line is used by starport scaffolding # 2
 	)
 
 	maccPerms = map[string][]string{
@@ -72,13 +79,16 @@ type NewApp struct {
 
 	subspaces map[string]params.Subspace
 
-	accountKeeper  auth.AccountKeeper
-	bankKeeper     bank.Keeper
-	stakingKeeper  staking.Keeper
-	supplyKeeper   supply.Keeper
-	paramsKeeper   params.Keeper
-	ethappKeeper ethappkeeper.Keeper
-  // this line is used by starport scaffolding # 3
+	accountKeeper auth.AccountKeeper
+	bankKeeper    bank.Keeper
+	stakingKeeper staking.Keeper
+	supplyKeeper  supply.Keeper
+	paramsKeeper  params.Keeper
+	ethappKeeper  ethappkeeper.Keeper
+	// this line is for Ethermint
+
+	EvmKeeper evm.Keeper
+	// this line is used by starport scaffolding # 3
 	mm *module.Manager
 
 	sm *module.SimulationManager
@@ -87,24 +97,32 @@ type NewApp struct {
 var _ simapp.App = (*NewApp)(nil)
 
 func NewInitApp(
-	logger log.Logger, db dbm.DB, traceStore io.Writer, loadLatest bool,
-	invCheckPeriod uint, baseAppOptions ...func(*bam.BaseApp),
+	logger log.Logger,
+	db dbm.DB,
+	traceStore io.Writer,
+	loadLatest bool,
+	invCheckPeriod uint,
+	baseAppOptions ...func(*bam.BaseApp),
 ) *NewApp {
 	cdc := MakeCodec()
 
-	bApp := bam.NewBaseApp(appName, logger, db, auth.DefaultTxDecoder(cdc), baseAppOptions...)
+	// the TxDecoder has to be changed to evm txdecoder
+	// NOTE we use custom Ethermint transaction decoder that supports the sdk.Tx interface instead of sdk.StdTx
+	bApp := bam.NewBaseApp(appName, logger, db, evm.TxDecoder(cdc), baseAppOptions...)
 	bApp.SetCommitMultiStoreTracer(traceStore)
 	bApp.SetAppVersion(version.Version)
 
 	keys := sdk.NewKVStoreKeys(
-    bam.MainStoreKey,
-    auth.StoreKey,
-    staking.StoreKey,
+		bam.MainStoreKey,
+		auth.StoreKey,
+		staking.StoreKey,
 		supply.StoreKey,
-    params.StoreKey,
-    ethapptypes.StoreKey,
-    // this line is used by starport scaffolding # 5
-  )
+		params.StoreKey,
+		ethapptypes.StoreKey,
+		// this line is used for the Ethermint
+		evm.StoreKey,
+		// this line is used by starport scaffolding # 5
+	)
 
 	tKeys := sdk.NewTransientStoreKeys(staking.TStoreKey, params.TStoreKey)
 
@@ -117,10 +135,13 @@ func NewInitApp(
 		subspaces:      make(map[string]params.Subspace),
 	}
 
+	// init params keeper and subspaces
 	app.paramsKeeper = params.NewKeeper(app.cdc, keys[params.StoreKey], tKeys[params.TStoreKey])
 	app.subspaces[auth.ModuleName] = app.paramsKeeper.Subspace(auth.DefaultParamspace)
 	app.subspaces[bank.ModuleName] = app.paramsKeeper.Subspace(bank.DefaultParamspace)
 	app.subspaces[staking.ModuleName] = app.paramsKeeper.Subspace(staking.DefaultParamspace)
+	// This line is used for Ethermint
+	app.subspaces[evm.ModuleName] = app.paramsKeeper.Subspace("evm")
 
 	app.accountKeeper = auth.NewAccountKeeper(
 		app.cdc,
@@ -160,7 +181,12 @@ func NewInitApp(
 		keys[ethapptypes.StoreKey],
 	)
 
-  // this line is used by starport scaffolding # 4
+	// this line is used for Ethermint
+	app.EvmKeeper = evm.NewKeeper(
+		app.cdc, keys[evm.StoreKey], app.subspaces[evm.ModuleName], app.accountKeeper,
+	)
+
+	// this line is used by starport scaffolding # 4
 
 	app.mm = module.NewManager(
 		genutil.NewAppModule(app.accountKeeper, app.stakingKeeper, app.BaseApp.DeliverTx),
@@ -169,10 +195,13 @@ func NewInitApp(
 		supply.NewAppModule(app.supplyKeeper, app.accountKeeper),
 		ethapp.NewAppModule(app.ethappKeeper, app.bankKeeper),
 		staking.NewAppModule(app.stakingKeeper, app.accountKeeper, app.supplyKeeper),
-    // this line is used by starport scaffolding # 6
+		// this line is used by Ethermint
+		evm.NewAppModule(app.EvmKeeper, app.accountKeeper),
+		// this line is used by starport scaffolding # 6
 	)
 
-	app.mm.SetOrderEndBlockers(staking.ModuleName)
+	// Next line is changed by Ethermint
+	app.mm.SetOrderEndBlockers(staking.ModuleName, evm.ModuleName)
 
 	app.mm.SetOrderInitGenesis(
 		staking.ModuleName,
@@ -181,7 +210,9 @@ func NewInitApp(
 		ethapptypes.ModuleName,
 		supply.ModuleName,
 		genutil.ModuleName,
-    // this line is used by starport scaffolding # 7
+		// this line is used for Ethermint
+		evm.ModuleName,
+		// this line is used by starport scaffolding # 7
 	)
 
 	app.mm.RegisterRoutes(app.Router(), app.QueryRouter())
@@ -191,10 +222,10 @@ func NewInitApp(
 	app.SetEndBlocker(app.EndBlocker)
 
 	app.SetAnteHandler(
-		auth.NewAnteHandler(
+		ante.NewAnteHandler(
 			app.accountKeeper,
+			app.EvmKeeper,
 			app.supplyKeeper,
-			auth.DefaultSigVerificationGasConsumer,
 		),
 	)
 
