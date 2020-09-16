@@ -17,6 +17,8 @@ import (
 	"github.com/cosmos/cosmos-sdk/types/module"
 	"github.com/cosmos/cosmos-sdk/version"
 	"github.com/cosmos/cosmos-sdk/x/auth"
+
+	// "github.com/cosmos/cosmos-sdk/x/auth/ante"
 	"github.com/cosmos/cosmos-sdk/x/bank"
 	"github.com/cosmos/cosmos-sdk/x/genutil"
 	"github.com/cosmos/cosmos-sdk/x/params"
@@ -29,6 +31,8 @@ import (
 	// These lines are Ethermint additions
 
 	"github.com/cosmos/ethermint/app/ante"
+	emintcrypto "github.com/cosmos/ethermint/crypto"
+	ethermint "github.com/cosmos/ethermint/types"
 	"github.com/cosmos/ethermint/x/evm"
 	// this line is used by starport scaffolding
 )
@@ -64,6 +68,8 @@ func MakeCodec() *codec.Codec {
 	ModuleBasics.RegisterCodec(cdc)
 	sdk.RegisterCodec(cdc)
 	codec.RegisterCrypto(cdc)
+	emintcrypto.RegisterCodec(cdc)
+	ethermint.RegisterCodec(cdc)
 
 	return cdc.Seal()
 }
@@ -141,13 +147,13 @@ func NewInitApp(
 	app.subspaces[bank.ModuleName] = app.paramsKeeper.Subspace(bank.DefaultParamspace)
 	app.subspaces[staking.ModuleName] = app.paramsKeeper.Subspace(staking.DefaultParamspace)
 	// This line is used for Ethermint
-	app.subspaces[evm.ModuleName] = app.paramsKeeper.Subspace("evm")
+	app.subspaces[evm.ModuleName] = app.paramsKeeper.Subspace(evm.DefaultParamspace)
 
 	app.accountKeeper = auth.NewAccountKeeper(
-		app.cdc,
+		cdc,
 		keys[auth.StoreKey],
 		app.subspaces[auth.ModuleName],
-		auth.ProtoBaseAccount,
+		ethermint.ProtoAccount,
 	)
 
 	app.bankKeeper = bank.NewBaseKeeper(
@@ -157,7 +163,7 @@ func NewInitApp(
 	)
 
 	app.supplyKeeper = supply.NewKeeper(
-		app.cdc,
+		cdc,
 		keys[supply.StoreKey],
 		app.accountKeeper,
 		app.bankKeeper,
@@ -165,7 +171,7 @@ func NewInitApp(
 	)
 
 	stakingKeeper := staking.NewKeeper(
-		app.cdc,
+		cdc,
 		keys[staking.StoreKey],
 		app.supplyKeeper,
 		app.subspaces[staking.ModuleName],
@@ -220,6 +226,10 @@ func NewInitApp(
 	app.SetInitChainer(app.InitChainer)
 	app.SetBeginBlocker(app.BeginBlocker)
 	app.SetEndBlocker(app.EndBlocker)
+
+	// // initialize stores
+	// app.MountKVStores(keys)
+	// app.MountTransientStores(tKeys)
 
 	app.SetAnteHandler(
 		ante.NewAnteHandler(

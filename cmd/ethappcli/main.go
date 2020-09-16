@@ -7,7 +7,6 @@ import (
 
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/flags"
-	"github.com/cosmos/cosmos-sdk/client/keys"
 	"github.com/cosmos/cosmos-sdk/client/lcd"
 
 	clientrpc "github.com/cosmos/cosmos-sdk/client/rpc"
@@ -26,6 +25,7 @@ import (
 
 	"github.com/tosch110/ethapp/app"
 	// this line is used by starport scaffolding
+	ethermintclient "github.com/cosmos/ethermint/client"
 	ethrpc "github.com/cosmos/ethermint/rpc"
 )
 
@@ -59,17 +59,17 @@ func main() {
 		client.ConfigCmd(app.DefaultCLIHome),
 		queryCmd(cdc),
 		txCmd(cdc),
-		flags.LineBreak,
 		ethrpc.EmintServeCmd(cdc),
+		flags.LineBreak,
 		lcd.ServeCommand(cdc, registerRoutes),
 		flags.LineBreak,
-		keys.Commands(),
+		ethermintclient.KeyCommands(),
 		flags.LineBreak,
 		version.Cmd,
 		flags.NewCompletionCmd(rootCmd, true),
 	)
 
-	// Add flags and prefix all env exposed with AA
+	// Add flags and prefix all env exposed with EM
 	executor := cli.PrepareMainCmd(rootCmd, "EM", app.DefaultCLIHome)
 
 	err := executor.Execute()

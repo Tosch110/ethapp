@@ -4,7 +4,7 @@ go 1.14
 
 require (
 	github.com/cosmos/cosmos-sdk v0.39.1
-	github.com/cosmos/ethermint v0.0.0-00010101000000-000000000000
+	github.com/cosmos/ethermint v0.2.0-rc6
 	github.com/golang/mock v1.4.3 // indirect
 	github.com/gorilla/mux v1.8.0
 	github.com/spf13/cobra v1.0.0
@@ -15,4 +15,4 @@ require (
 	go.etcd.io/bbolt v1.3.4 // indirect
 )
 
-replace github.com/cosmos/ethermint => github.com/ChainSafe/ethermint v0.2.0-rc4
+replace github.com/cosmos/ethermint => github.com/ChainSafe/ethermint v0.2.0-rc6
