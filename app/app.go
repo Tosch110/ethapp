@@ -25,15 +25,18 @@ import (
 	"github.com/tosch110/ethapp/x/ethapp"
 	ethappkeeper "github.com/tosch110/ethapp/x/ethapp/keeper"
 	ethapptypes "github.com/tosch110/ethapp/x/ethapp/types"
-  // this line is used by starport scaffolding
+
+	// this line is used by starport scaffolding
+	"github.com/cosmos/ethermint/app/ante"
+	"github.com/cosmos/ethermint/x/evm"
 )
 
 const appName = "ethapp"
 
 var (
-	DefaultCLIHome = os.ExpandEnv("$HOME/.ethappcli")
+	DefaultCLIHome  = os.ExpandEnv("$HOME/.ethappcli")
 	DefaultNodeHome = os.ExpandEnv("$HOME/.ethappd")
-	ModuleBasics = module.NewBasicManager(
+	ModuleBasics    = module.NewBasicManager(
 		genutil.AppModuleBasic{},
 		auth.AppModuleBasic{},
 		bank.AppModuleBasic{},
@@ -41,7 +44,8 @@ var (
 		params.AppModuleBasic{},
 		supply.AppModuleBasic{},
 		ethapp.AppModuleBasic{},
-    // this line is used by starport scaffolding # 2
+		// this line is used by starport scaffolding # 2
+		evm.AppModuleBasic{},
 	)
 
 	maccPerms = map[string][]string{
@@ -72,14 +76,15 @@ type NewApp struct {
 
 	subspaces map[string]params.Subspace
 
-	accountKeeper  auth.AccountKeeper
-	bankKeeper     bank.Keeper
-	stakingKeeper  staking.Keeper
-	supplyKeeper   supply.Keeper
-	paramsKeeper   params.Keeper
-	ethappKeeper ethappkeeper.Keeper
-  // this line is used by starport scaffolding # 3
-	mm *module.Manager
+	accountKeeper auth.AccountKeeper
+	bankKeeper    bank.Keeper
+	stakingKeeper staking.Keeper
+	supplyKeeper  supply.Keeper
+	paramsKeeper  params.Keeper
+	ethappKeeper  ethappkeeper.Keeper
+	// this line is used by starport scaffolding # 3
+	EvmKeeper evm.Keeper
+	mm        *module.Manager
 
 	sm *module.SimulationManager
 }
@@ -97,14 +102,15 @@ func NewInitApp(
 	bApp.SetAppVersion(version.Version)
 
 	keys := sdk.NewKVStoreKeys(
-    bam.MainStoreKey,
-    auth.StoreKey,
-    staking.StoreKey,
+		bam.MainStoreKey,
+		auth.StoreKey,
+		staking.StoreKey,
 		supply.StoreKey,
-    params.StoreKey,
-    ethapptypes.StoreKey,
-    // this line is used by starport scaffolding # 5
-  )
+		params.StoreKey,
+		ethapptypes.StoreKey,
+		// this line is used by starport scaffolding # 5
+		evm.StoreKey,
+	)
 
 	tKeys := sdk.NewTransientStoreKeys(staking.TStoreKey, params.TStoreKey)
 
@@ -121,6 +127,7 @@ func NewInitApp(
 	app.subspaces[auth.ModuleName] = app.paramsKeeper.Subspace(auth.DefaultParamspace)
 	app.subspaces[bank.ModuleName] = app.paramsKeeper.Subspace(bank.DefaultParamspace)
 	app.subspaces[staking.ModuleName] = app.paramsKeeper.Subspace(staking.DefaultParamspace)
+	app.subspaces[evm.ModuleName] = app.paramsKeeper.Subspace(evm.DefaultParamspace)
 
 	app.accountKeeper = auth.NewAccountKeeper(
 		app.cdc,
@@ -160,7 +167,11 @@ func NewInitApp(
 		keys[ethapptypes.StoreKey],
 	)
 
-  // this line is used by starport scaffolding # 4
+	// this line is used by starport scaffolding # 4
+
+	app.EvmKeeper = evm.NewKeeper(
+		app.cdc, keys[evm.StoreKey], app.subspaces[evm.ModuleName], app.accountKeeper,
+	)
 
 	app.mm = module.NewManager(
 		genutil.NewAppModule(app.accountKeeper, app.stakingKeeper, app.BaseApp.DeliverTx),
@@ -169,7 +180,8 @@ func NewInitApp(
 		supply.NewAppModule(app.supplyKeeper, app.accountKeeper),
 		ethapp.NewAppModule(app.ethappKeeper, app.bankKeeper),
 		staking.NewAppModule(app.stakingKeeper, app.accountKeeper, app.supplyKeeper),
-    // this line is used by starport scaffolding # 6
+		// this line is used by starport scaffolding # 6
+		evm.NewAppModule(app.EvmKeeper, app.accountKeeper),
 	)
 
 	app.mm.SetOrderEndBlockers(staking.ModuleName)
@@ -181,7 +193,8 @@ func NewInitApp(
 		ethapptypes.ModuleName,
 		supply.ModuleName,
 		genutil.ModuleName,
-    // this line is used by starport scaffolding # 7
+		// this line is used by starport scaffolding # 7
+		evm.ModuleName,
 	)
 
 	app.mm.RegisterRoutes(app.Router(), app.QueryRouter())
@@ -191,10 +204,10 @@ func NewInitApp(
 	app.SetEndBlocker(app.EndBlocker)
 
 	app.SetAnteHandler(
-		auth.NewAnteHandler(
+		ante.NewAnteHandler(
 			app.accountKeeper,
+			app.EvmKeeper,
 			app.supplyKeeper,
-			auth.DefaultSigVerificationGasConsumer,
 		),
 	)
 
