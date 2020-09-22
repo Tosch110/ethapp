@@ -14,17 +14,13 @@ import (
 	"github.com/cosmos/cosmos-sdk/x/bank"
 	"github.com/cosmos/cosmos-sdk/x/crisis"
 	distr "github.com/cosmos/cosmos-sdk/x/distribution"
-	"github.com/cosmos/cosmos-sdk/x/evidence"
 	"github.com/cosmos/cosmos-sdk/x/genutil"
-	"github.com/cosmos/cosmos-sdk/x/gov"
 	"github.com/cosmos/cosmos-sdk/x/mint"
 	"github.com/cosmos/cosmos-sdk/x/params"
-	paramsclient "github.com/cosmos/cosmos-sdk/x/params/client"
 	"github.com/cosmos/cosmos-sdk/x/slashing"
 	"github.com/cosmos/cosmos-sdk/x/staking"
 	"github.com/cosmos/cosmos-sdk/x/supply"
 	"github.com/cosmos/cosmos-sdk/x/upgrade"
-	upgradeclient "github.com/cosmos/cosmos-sdk/x/upgrade/client"
 
 	"github.com/cosmos/ethermint/app/ante"
 	ethermintcodec "github.com/cosmos/ethermint/codec"
@@ -65,13 +61,9 @@ var (
 		staking.AppModuleBasic{},
 		mint.AppModuleBasic{},
 		distr.AppModuleBasic{},
-		gov.NewAppModuleBasic(
-			paramsclient.ProposalHandler, distr.ProposalHandler, upgradeclient.ProposalHandler,
-		),
 		params.AppModuleBasic{},
 		crisis.AppModuleBasic{},
 		slashing.AppModuleBasic{},
-		evidence.AppModuleBasic{},
 		upgrade.AppModuleBasic{},
 		evm.AppModuleBasic{},
 		faucet.AppModuleBasic{},
@@ -84,7 +76,6 @@ var (
 		mint.ModuleName:           {supply.Minter},
 		staking.BondedPoolName:    {supply.Burner, supply.Staking},
 		staking.NotBondedPoolName: {supply.Burner, supply.Staking},
-		gov.ModuleName:            {supply.Burner},
 		faucet.ModuleName:         {supply.Minter},
 	}
 
@@ -120,11 +111,9 @@ type App struct {
 	SlashingKeeper slashing.Keeper
 	MintKeeper     mint.Keeper
 	DistrKeeper    distr.Keeper
-	GovKeeper      gov.Keeper
 	CrisisKeeper   crisis.Keeper
 	UpgradeKeeper  upgrade.Keeper
 	ParamsKeeper   params.Keeper
-	EvidenceKeeper evidence.Keeper
 	EvmKeeper      evm.Keeper
 	FaucetKeeper   faucet.Keeper
 
@@ -157,7 +146,7 @@ func NewApp(
 	keys := sdk.NewKVStoreKeys(
 		bam.MainStoreKey, auth.StoreKey, staking.StoreKey,
 		supply.StoreKey, mint.StoreKey, distr.StoreKey, slashing.StoreKey,
-		gov.StoreKey, params.StoreKey, upgrade.StoreKey, evidence.StoreKey,
+		params.StoreKey, upgrade.StoreKey,
 		evm.StoreKey, faucet.StoreKey,
 	)
 
@@ -180,9 +169,7 @@ func NewApp(
 	app.subspaces[mint.ModuleName] = app.ParamsKeeper.Subspace(mint.DefaultParamspace)
 	app.subspaces[distr.ModuleName] = app.ParamsKeeper.Subspace(distr.DefaultParamspace)
 	app.subspaces[slashing.ModuleName] = app.ParamsKeeper.Subspace(slashing.DefaultParamspace)
-	app.subspaces[gov.ModuleName] = app.ParamsKeeper.Subspace(gov.DefaultParamspace).WithKeyTable(gov.ParamKeyTable())
 	app.subspaces[crisis.ModuleName] = app.ParamsKeeper.Subspace(crisis.DefaultParamspace)
-	app.subspaces[evidence.ModuleName] = app.ParamsKeeper.Subspace(evidence.DefaultParamspace)
 	app.subspaces[evm.ModuleName] = app.ParamsKeeper.Subspace(evm.DefaultParamspace)
 
 	// use custom Chain account for contracts
@@ -222,27 +209,6 @@ func NewApp(
 		app.cdc, keys[faucet.StoreKey], app.SupplyKeeper,
 	)
 
-	// create evidence keeper with router
-	evidenceKeeper := evidence.NewKeeper(
-		cdc, keys[evidence.StoreKey], app.subspaces[evidence.ModuleName], &app.StakingKeeper, app.SlashingKeeper,
-	)
-	evidenceRouter := evidence.NewRouter()
-	// TODO: Register evidence routes.
-	evidenceKeeper.SetRouter(evidenceRouter)
-	app.EvidenceKeeper = *evidenceKeeper
-
-	// register the proposal types
-	govRouter := gov.NewRouter()
-	govRouter.AddRoute(gov.RouterKey, gov.ProposalHandler).
-		AddRoute(params.RouterKey, params.NewParamChangeProposalHandler(app.ParamsKeeper)).
-		AddRoute(distr.RouterKey, distr.NewCommunityPoolSpendProposalHandler(app.DistrKeeper)).
-		AddRoute(upgrade.RouterKey, upgrade.NewSoftwareUpgradeProposalHandler(app.UpgradeKeeper))
-
-	app.GovKeeper = gov.NewKeeper(
-		cdc, keys[gov.StoreKey], app.subspaces[gov.ModuleName], app.SupplyKeeper,
-		&stakingKeeper, govRouter,
-	)
-
 	// register the staking hooks
 	// NOTE: stakingKeeper above is passed by reference, so that it will contain these hooks
 	app.StakingKeeper = *stakingKeeper.SetHooks(
@@ -257,12 +223,10 @@ func NewApp(
 		bank.NewAppModule(app.BankKeeper, app.AccountKeeper),
 		crisis.NewAppModule(&app.CrisisKeeper),
 		supply.NewAppModule(app.SupplyKeeper, app.AccountKeeper),
-		gov.NewAppModule(app.GovKeeper, app.AccountKeeper, app.SupplyKeeper),
 		mint.NewAppModule(app.MintKeeper),
 		slashing.NewAppModule(app.SlashingKeeper, app.AccountKeeper, app.StakingKeeper),
 		distr.NewAppModule(app.DistrKeeper, app.AccountKeeper, app.SupplyKeeper, app.StakingKeeper),
 		staking.NewAppModule(app.StakingKeeper, app.AccountKeeper, app.SupplyKeeper),
-		evidence.NewAppModule(app.EvidenceKeeper),
 		evm.NewAppModule(app.EvmKeeper, app.AccountKeeper),
 		faucet.NewAppModule(app.FaucetKeeper),
 	)
@@ -272,18 +236,17 @@ func NewApp(
 	// CanWithdrawInvariant invariant.
 	app.mm.SetOrderBeginBlockers(
 		evm.ModuleName, mint.ModuleName, distr.ModuleName, slashing.ModuleName,
-		evidence.ModuleName,
 	)
 	app.mm.SetOrderEndBlockers(
-		evm.ModuleName, crisis.ModuleName, gov.ModuleName, staking.ModuleName,
+		evm.ModuleName, crisis.ModuleName, staking.ModuleName,
 	)
 
 	// NOTE: The genutils module must occur after staking so that pools are
 	// properly initialized with tokens from genesis accounts.
 	app.mm.SetOrderInitGenesis(
 		auth.ModuleName, distr.ModuleName, staking.ModuleName, bank.ModuleName,
-		slashing.ModuleName, gov.ModuleName, mint.ModuleName, supply.ModuleName,
-		crisis.ModuleName, genutil.ModuleName, evidence.ModuleName, evm.ModuleName,
+		slashing.ModuleName, mint.ModuleName, supply.ModuleName,
+		crisis.ModuleName, genutil.ModuleName, evm.ModuleName,
 		faucet.ModuleName,
 	)
 
@@ -298,7 +261,6 @@ func NewApp(
 		auth.NewAppModule(app.AccountKeeper),
 		bank.NewAppModule(app.BankKeeper, app.AccountKeeper),
 		supply.NewAppModule(app.SupplyKeeper, app.AccountKeeper),
-		gov.NewAppModule(app.GovKeeper, app.AccountKeeper, app.SupplyKeeper),
 		mint.NewAppModule(app.MintKeeper),
 		staking.NewAppModule(app.StakingKeeper, app.AccountKeeper, app.SupplyKeeper),
 		distr.NewAppModule(app.DistrKeeper, app.AccountKeeper, app.SupplyKeeper, app.StakingKeeper),
