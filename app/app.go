@@ -85,12 +85,12 @@ var (
 	}
 )
 
-var _ simapp.App = (*App)(nil)
+var _ simapp.App = (*NewApp)(nil)
 
-// App implements an extended ABCI application. It is an application
+// NewApp implements an extended ABCI application. It is an application
 // that may process transactions through Ethereum's EVM running atop of
 // Tendermint consensus.
-type App struct {
+type NewApp struct {
 	*bam.BaseApp
 	cdc *codec.Codec
 
@@ -126,7 +126,7 @@ type App struct {
 
 // NewApp returns a reference to a new initialized Chain
 // application.
-func NewApp(
+func NewAppInit(
 	logger log.Logger,
 	db dbm.DB,
 	traceStore io.Writer,
@@ -134,7 +134,7 @@ func NewApp(
 	skipUpgradeHeights map[int64]bool,
 	invCheckPeriod uint,
 	baseAppOptions ...func(*bam.BaseApp),
-) *App {
+) *NewApp {
 
 	cdc := ethermintcodec.MakeCodec(ModuleBasics)
 
@@ -152,7 +152,7 @@ func NewApp(
 
 	tkeys := sdk.NewTransientStoreKeys(params.TStoreKey)
 
-	app := &App{
+	app := &NewApp{
 		BaseApp:        bApp,
 		cdc:            cdc,
 		invCheckPeriod: invCheckPeriod,
@@ -291,32 +291,32 @@ func NewApp(
 }
 
 // Name returns the name of the App
-func (app *App) Name() string { return app.BaseApp.Name() }
+func (app *NewApp) Name() string { return app.BaseApp.Name() }
 
 // BeginBlocker updates every begin block
-func (app *App) BeginBlocker(ctx sdk.Context, req abci.RequestBeginBlock) abci.ResponseBeginBlock {
+func (app *NewApp) BeginBlocker(ctx sdk.Context, req abci.RequestBeginBlock) abci.ResponseBeginBlock {
 	return app.mm.BeginBlock(ctx, req)
 }
 
 // EndBlocker updates every end block
-func (app *App) EndBlocker(ctx sdk.Context, req abci.RequestEndBlock) abci.ResponseEndBlock {
+func (app *NewApp) EndBlocker(ctx sdk.Context, req abci.RequestEndBlock) abci.ResponseEndBlock {
 	return app.mm.EndBlock(ctx, req)
 }
 
 // InitChainer updates at chain initialization
-func (app *App) InitChainer(ctx sdk.Context, req abci.RequestInitChain) abci.ResponseInitChain {
+func (app *NewApp) InitChainer(ctx sdk.Context, req abci.RequestInitChain) abci.ResponseInitChain {
 	var genesisState simapp.GenesisState
 	app.cdc.MustUnmarshalJSON(req.AppStateBytes, &genesisState)
 	return app.mm.InitGenesis(ctx, genesisState)
 }
 
 // LoadHeight loads state at a particular height
-func (app *App) LoadHeight(height int64) error {
+func (app *NewApp) LoadHeight(height int64) error {
 	return app.LoadVersion(height, app.keys[bam.MainStoreKey])
 }
 
 // ModuleAccountAddrs returns all the app's module account addresses.
-func (app *App) ModuleAccountAddrs() map[string]bool {
+func (app *NewApp) ModuleAccountAddrs() map[string]bool {
 	modAccAddrs := make(map[string]bool)
 	for acc := range maccPerms {
 		modAccAddrs[supply.NewModuleAddress(acc).String()] = true
@@ -326,7 +326,7 @@ func (app *App) ModuleAccountAddrs() map[string]bool {
 }
 
 // BlacklistedAccAddrs returns all the app's module account addresses black listed for receiving tokens.
-func (app *App) BlacklistedAccAddrs() map[string]bool {
+func (app *NewApp) BlacklistedAccAddrs() map[string]bool {
 	blacklistedAddrs := make(map[string]bool)
 	for acc := range maccPerms {
 		blacklistedAddrs[supply.NewModuleAddress(acc).String()] = !allowedReceivingModAcc[acc]
@@ -336,14 +336,14 @@ func (app *App) BlacklistedAccAddrs() map[string]bool {
 }
 
 // SimulationManager implements the SimulationApp interface
-func (app *App) SimulationManager() *module.SimulationManager {
+func (app *NewApp) SimulationManager() *module.SimulationManager {
 	return app.sm
 }
 
 // GetKey returns the KVStoreKey for the provided store key.
 //
 // NOTE: This is solely to be used for testing purposes.
-func (app *App) GetKey(storeKey string) *sdk.KVStoreKey {
+func (app *NewApp) GetKey(storeKey string) *sdk.KVStoreKey {
 	return app.keys[storeKey]
 }
 
@@ -351,7 +351,7 @@ func (app *App) GetKey(storeKey string) *sdk.KVStoreKey {
 //
 // NOTE: This is solely to be used for testing purposes as it may be desirable
 // for modules to register their own custom testing types.
-func (app *App) Codec() *codec.Codec {
+func (app *NewApp) Codec() *codec.Codec {
 	return app.cdc
 }
 
