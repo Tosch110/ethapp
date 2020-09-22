@@ -1,3 +1,14 @@
+
+# Quick start
+
+```
+starport serve --verbose
+ethappd start
+# in a new terminal window
+ethappcli rest-server --laddr "tcp://localhost:8545" --trace --chain-id 0 --unlock-key user2
+```
+
+
 # ethapp
 
 **ethapp** is a blockchain application built using Cosmos SDK and Tendermint and generated with [Starport](https://github.com/tendermint/starport).
