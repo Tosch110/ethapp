@@ -11,14 +11,19 @@ import (
 	"github.com/tendermint/tendermint/libs/cli"
 
 	"github.com/cosmos/cosmos-sdk/client/flags"
-	"github.com/cosmos/cosmos-sdk/crypto/keys"
 	"github.com/cosmos/cosmos-sdk/codec"
+	"github.com/cosmos/cosmos-sdk/crypto/keys"
 	"github.com/cosmos/cosmos-sdk/server"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/x/auth"
 	authexported "github.com/cosmos/cosmos-sdk/x/auth/exported"
 	authvesting "github.com/cosmos/cosmos-sdk/x/auth/vesting"
 	"github.com/cosmos/cosmos-sdk/x/genutil"
+
+	"github.com/cosmos/ethermint/crypto"
+	ethermint "github.com/cosmos/ethermint/types"
+
+	ethcrypto "github.com/ethereum/go-ethereum/crypto"
 )
 
 const (
@@ -55,6 +60,7 @@ contain valid denominations. Accounts may optionally be supplied with vesting pa
 					viper.GetString(flags.FlagKeyringBackend),
 					viper.GetString(flagClientHome),
 					inBuf,
+					crypto.EthSecp256k1Options()...,
 				)
 				if err != nil {
 					return err
@@ -83,11 +89,18 @@ contain valid denominations. Accounts may optionally be supplied with vesting pa
 			// create concrete account type based on input parameters
 			var genAccount authexported.GenesisAccount
 
-			baseAccount := auth.NewBaseAccount(addr, coins.Sort(), nil, 0, 0)
+			// balances := bank.Balance{Address: addr, Coins: coins.Sort()}
+			coins = coins.Sort()
+			baseAccount := auth.NewBaseAccount(addr, coins, nil, 0, 0)
 			if !vestingAmt.IsZero() {
 				baseVestingAccount, err := authvesting.NewBaseVestingAccount(baseAccount, vestingAmt.Sort(), vestingEnd)
 				if err != nil {
-					return fmt.Errorf("failed to create base vesting account: %w", err)
+					return err
+				}
+
+				if (coins.IsZero() && !baseVestingAccount.OriginalVesting.IsZero()) ||
+					baseVestingAccount.OriginalVesting.IsAnyGT(coins) {
+					return errors.New("vesting amount cannot be greater than total amount")
 				}
 
 				switch {
@@ -101,7 +114,10 @@ contain valid denominations. Accounts may optionally be supplied with vesting pa
 					return errors.New("invalid vesting parameters; must supply start and end time or end time")
 				}
 			} else {
-				genAccount = baseAccount
+				genAccount = ethermint.EthAccount{
+					BaseAccount: baseAccount,
+					CodeHash:    ethcrypto.Keccak256(nil),
+				}
 			}
 
 			if err := genAccount.Validate(); err != nil {
@@ -131,6 +147,17 @@ contain valid denominations. Accounts may optionally be supplied with vesting pa
 			}
 
 			appState[auth.ModuleName] = authGenStateBz
+
+			// bankGenState := bank.GetGenesisStateFromAppState(depCdc, appState)
+			// bankGenState.Balances = append(bankGenState.Balances, balances)
+			// bankGenState.Balances = bank.SanitizeGenesisBalances(bankGenState.Balances)
+
+			// bankGenStateBz, err := cdc.MarshalJSON(bankGenState)
+			// if err != nil {
+			// 	return fmt.Errorf("failed to marshal bank genesis state: %w", err)
+			// }
+
+			// appState[bank.ModuleName] = bankGenStateBz
 
 			appStateJSON, err := cdc.MarshalJSON(appState)
 			if err != nil {
