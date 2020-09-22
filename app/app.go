@@ -25,7 +25,6 @@ import (
 	ethermintcodec "github.com/cosmos/ethermint/codec"
 	ethermint "github.com/cosmos/ethermint/types"
 	"github.com/cosmos/ethermint/x/evm"
-	"github.com/cosmos/ethermint/x/faucet"
 
 	abci "github.com/tendermint/tendermint/abci/types"
 	"github.com/tendermint/tendermint/libs/log"
@@ -64,7 +63,6 @@ var (
 		slashing.AppModuleBasic{},
 		upgrade.AppModuleBasic{},
 		evm.AppModuleBasic{},
-		faucet.AppModuleBasic{},
 	)
 
 	// module account permissions
@@ -74,7 +72,6 @@ var (
 		mint.ModuleName:           {supply.Minter},
 		staking.BondedPoolName:    {supply.Burner, supply.Staking},
 		staking.NotBondedPoolName: {supply.Burner, supply.Staking},
-		faucet.ModuleName:         {supply.Minter},
 	}
 
 	// module accounts that are allowed to receive tokens
@@ -112,7 +109,6 @@ type NewApp struct {
 	UpgradeKeeper  upgrade.Keeper
 	ParamsKeeper   params.Keeper
 	EvmKeeper      evm.Keeper
-	FaucetKeeper   faucet.Keeper
 
 	// the module manager
 	mm *module.Manager
@@ -144,7 +140,7 @@ func NewAppInit(
 		bam.MainStoreKey, auth.StoreKey, staking.StoreKey,
 		supply.StoreKey, mint.StoreKey, distr.StoreKey, slashing.StoreKey,
 		params.StoreKey, upgrade.StoreKey,
-		evm.StoreKey, faucet.StoreKey,
+		evm.StoreKey,
 	)
 
 	tkeys := sdk.NewTransientStoreKeys(params.TStoreKey)
@@ -199,9 +195,6 @@ func NewAppInit(
 	app.UpgradeKeeper = upgrade.NewKeeper(
 		skipUpgradeHeights, keys[upgrade.StoreKey], app.cdc,
 	)
-	app.FaucetKeeper = faucet.NewKeeper(
-		app.cdc, keys[faucet.StoreKey], app.SupplyKeeper,
-	)
 
 	// register the staking hooks
 	// NOTE: stakingKeeper above is passed by reference, so that it will contain these hooks
@@ -221,7 +214,6 @@ func NewAppInit(
 		distr.NewAppModule(app.DistrKeeper, app.AccountKeeper, app.SupplyKeeper, app.StakingKeeper),
 		staking.NewAppModule(app.StakingKeeper, app.AccountKeeper, app.SupplyKeeper),
 		evm.NewAppModule(app.EvmKeeper, app.AccountKeeper),
-		faucet.NewAppModule(app.FaucetKeeper),
 	)
 
 	// During begin block slashing happens after distr.BeginBlocker so that
@@ -240,7 +232,6 @@ func NewAppInit(
 		auth.ModuleName, distr.ModuleName, staking.ModuleName, bank.ModuleName,
 		slashing.ModuleName, mint.ModuleName, supply.ModuleName,
 		genutil.ModuleName, evm.ModuleName,
-		faucet.ModuleName,
 	)
 
 	app.mm.RegisterRoutes(app.Router(), app.QueryRouter())
