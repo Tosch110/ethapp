@@ -12,7 +12,6 @@ import (
 	"github.com/cosmos/cosmos-sdk/version"
 	"github.com/cosmos/cosmos-sdk/x/auth"
 	"github.com/cosmos/cosmos-sdk/x/bank"
-	"github.com/cosmos/cosmos-sdk/x/crisis"
 	distr "github.com/cosmos/cosmos-sdk/x/distribution"
 	"github.com/cosmos/cosmos-sdk/x/genutil"
 	"github.com/cosmos/cosmos-sdk/x/mint"
@@ -62,7 +61,6 @@ var (
 		mint.AppModuleBasic{},
 		distr.AppModuleBasic{},
 		params.AppModuleBasic{},
-		crisis.AppModuleBasic{},
 		slashing.AppModuleBasic{},
 		upgrade.AppModuleBasic{},
 		evm.AppModuleBasic{},
@@ -111,7 +109,6 @@ type NewApp struct {
 	SlashingKeeper slashing.Keeper
 	MintKeeper     mint.Keeper
 	DistrKeeper    distr.Keeper
-	CrisisKeeper   crisis.Keeper
 	UpgradeKeeper  upgrade.Keeper
 	ParamsKeeper   params.Keeper
 	EvmKeeper      evm.Keeper
@@ -169,7 +166,6 @@ func NewAppInit(
 	app.subspaces[mint.ModuleName] = app.ParamsKeeper.Subspace(mint.DefaultParamspace)
 	app.subspaces[distr.ModuleName] = app.ParamsKeeper.Subspace(distr.DefaultParamspace)
 	app.subspaces[slashing.ModuleName] = app.ParamsKeeper.Subspace(slashing.DefaultParamspace)
-	app.subspaces[crisis.ModuleName] = app.ParamsKeeper.Subspace(crisis.DefaultParamspace)
 	app.subspaces[evm.ModuleName] = app.ParamsKeeper.Subspace(evm.DefaultParamspace)
 
 	// use custom Chain account for contracts
@@ -196,9 +192,7 @@ func NewAppInit(
 	app.SlashingKeeper = slashing.NewKeeper(
 		cdc, keys[slashing.StoreKey], &stakingKeeper, app.subspaces[slashing.ModuleName],
 	)
-	app.CrisisKeeper = crisis.NewKeeper(
-		app.subspaces[crisis.ModuleName], invCheckPeriod, app.SupplyKeeper, auth.FeeCollectorName,
-	)
+
 	app.EvmKeeper = evm.NewKeeper(
 		app.cdc, keys[evm.StoreKey], app.subspaces[evm.ModuleName], app.AccountKeeper,
 	)
@@ -221,7 +215,6 @@ func NewAppInit(
 		genutil.NewAppModule(app.AccountKeeper, app.StakingKeeper, app.BaseApp.DeliverTx),
 		auth.NewAppModule(app.AccountKeeper),
 		bank.NewAppModule(app.BankKeeper, app.AccountKeeper),
-		crisis.NewAppModule(&app.CrisisKeeper),
 		supply.NewAppModule(app.SupplyKeeper, app.AccountKeeper),
 		mint.NewAppModule(app.MintKeeper),
 		slashing.NewAppModule(app.SlashingKeeper, app.AccountKeeper, app.StakingKeeper),
@@ -238,7 +231,7 @@ func NewAppInit(
 		evm.ModuleName, mint.ModuleName, distr.ModuleName, slashing.ModuleName,
 	)
 	app.mm.SetOrderEndBlockers(
-		evm.ModuleName, crisis.ModuleName, staking.ModuleName,
+		evm.ModuleName, staking.ModuleName,
 	)
 
 	// NOTE: The genutils module must occur after staking so that pools are
@@ -246,11 +239,10 @@ func NewAppInit(
 	app.mm.SetOrderInitGenesis(
 		auth.ModuleName, distr.ModuleName, staking.ModuleName, bank.ModuleName,
 		slashing.ModuleName, mint.ModuleName, supply.ModuleName,
-		crisis.ModuleName, genutil.ModuleName, evm.ModuleName,
+		genutil.ModuleName, evm.ModuleName,
 		faucet.ModuleName,
 	)
 
-	app.mm.RegisterInvariants(&app.CrisisKeeper)
 	app.mm.RegisterRoutes(app.Router(), app.QueryRouter())
 
 	// create the simulation manager and define the order of the modules for deterministic simulations
