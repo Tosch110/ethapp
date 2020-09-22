@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 
@@ -73,12 +74,13 @@ func main() {
 		flags.NewCompletionCmd(rootCmd, true),
 	)
 
-	// Add flags and prefix all env exposed with AC
-	executor := cli.PrepareMainCmd(rootCmd, "AC", app.DefaultCLIHome)
+	// Add flags and prefix all env exposed with AA
+	executor := cli.PrepareMainCmd(rootCmd, "AA", app.DefaultCLIHome)
 
 	err := executor.Execute()
 	if err != nil {
-		panic(fmt.Errorf("failed executing CLI command: %w", err))
+		fmt.Printf("Failed executing CLI command: %s, exiting...\n", err)
+		os.Exit(1)
 	}
 }
 

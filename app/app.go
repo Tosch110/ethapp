@@ -12,25 +12,18 @@ import (
 	"github.com/cosmos/cosmos-sdk/version"
 	"github.com/cosmos/cosmos-sdk/x/auth"
 	"github.com/cosmos/cosmos-sdk/x/bank"
-	"github.com/cosmos/cosmos-sdk/x/crisis"
 	distr "github.com/cosmos/cosmos-sdk/x/distribution"
-	"github.com/cosmos/cosmos-sdk/x/evidence"
 	"github.com/cosmos/cosmos-sdk/x/genutil"
-	"github.com/cosmos/cosmos-sdk/x/gov"
 	"github.com/cosmos/cosmos-sdk/x/mint"
 	"github.com/cosmos/cosmos-sdk/x/params"
-	paramsclient "github.com/cosmos/cosmos-sdk/x/params/client"
 	"github.com/cosmos/cosmos-sdk/x/slashing"
 	"github.com/cosmos/cosmos-sdk/x/staking"
 	"github.com/cosmos/cosmos-sdk/x/supply"
-	"github.com/cosmos/cosmos-sdk/x/upgrade"
-	upgradeclient "github.com/cosmos/cosmos-sdk/x/upgrade/client"
 
 	"github.com/cosmos/ethermint/app/ante"
 	ethermintcodec "github.com/cosmos/ethermint/codec"
 	ethermint "github.com/cosmos/ethermint/types"
 	"github.com/cosmos/ethermint/x/evm"
-	"github.com/cosmos/ethermint/x/faucet"
 
 	abci "github.com/tendermint/tendermint/abci/types"
 	"github.com/tendermint/tendermint/libs/log"
@@ -65,16 +58,9 @@ var (
 		staking.AppModuleBasic{},
 		mint.AppModuleBasic{},
 		distr.AppModuleBasic{},
-		gov.NewAppModuleBasic(
-			paramsclient.ProposalHandler, distr.ProposalHandler, upgradeclient.ProposalHandler,
-		),
 		params.AppModuleBasic{},
-		crisis.AppModuleBasic{},
 		slashing.AppModuleBasic{},
-		evidence.AppModuleBasic{},
-		upgrade.AppModuleBasic{},
 		evm.AppModuleBasic{},
-		faucet.AppModuleBasic{},
 	)
 
 	// module account permissions
@@ -84,8 +70,6 @@ var (
 		mint.ModuleName:           {supply.Minter},
 		staking.BondedPoolName:    {supply.Burner, supply.Staking},
 		staking.NotBondedPoolName: {supply.Burner, supply.Staking},
-		gov.ModuleName:            {supply.Burner},
-		faucet.ModuleName:         {supply.Minter},
 	}
 
 	// module accounts that are allowed to receive tokens
@@ -94,12 +78,12 @@ var (
 	}
 )
 
-var _ simapp.App = (*App)(nil)
+var _ simapp.App = (*NewApp)(nil)
 
-// App implements an extended ABCI application. It is an application
+// NewApp implements an extended ABCI application. It is an application
 // that may process transactions through Ethereum's EVM running atop of
 // Tendermint consensus.
-type App struct {
+type NewApp struct {
 	*bam.BaseApp
 	cdc *codec.Codec
 
@@ -107,26 +91,21 @@ type App struct {
 
 	// keys to access the substores
 	keys  map[string]*sdk.KVStoreKey
-	tkeys map[string]*sdk.TransientStoreKey
+	tKeys map[string]*sdk.TransientStoreKey
 
 	// subspaces
 	subspaces map[string]params.Subspace
 
 	// keepers
-	AccountKeeper  auth.AccountKeeper
-	BankKeeper     bank.Keeper
-	SupplyKeeper   supply.Keeper
-	StakingKeeper  staking.Keeper
-	SlashingKeeper slashing.Keeper
+	accountKeeper  auth.AccountKeeper
+	bankKeeper     bank.Keeper
+	supplyKeeper   supply.Keeper
+	stakingKeeper  staking.Keeper
+	slashingKeeper slashing.Keeper
 	MintKeeper     mint.Keeper
 	DistrKeeper    distr.Keeper
-	GovKeeper      gov.Keeper
-	CrisisKeeper   crisis.Keeper
-	UpgradeKeeper  upgrade.Keeper
-	ParamsKeeper   params.Keeper
-	EvidenceKeeper evidence.Keeper
+	paramsKeeper   params.Keeper
 	EvmKeeper      evm.Keeper
-	FaucetKeeper   faucet.Keeper
 
 	// the module manager
 	mm *module.Manager
@@ -137,15 +116,14 @@ type App struct {
 
 // NewApp returns a reference to a new initialized Chain
 // application.
-func NewApp(
+func NewAppInit(
 	logger log.Logger,
 	db dbm.DB,
 	traceStore io.Writer,
 	loadLatest bool,
-	skipUpgradeHeights map[int64]bool,
 	invCheckPeriod uint,
 	baseAppOptions ...func(*bam.BaseApp),
-) *App {
+) *NewApp {
 
 	cdc := ethermintcodec.MakeCodec(ModuleBasics)
 
@@ -157,114 +135,78 @@ func NewApp(
 	keys := sdk.NewKVStoreKeys(
 		bam.MainStoreKey, auth.StoreKey, staking.StoreKey,
 		supply.StoreKey, mint.StoreKey, distr.StoreKey, slashing.StoreKey,
-		gov.StoreKey, params.StoreKey, upgrade.StoreKey, evidence.StoreKey,
-		evm.StoreKey, faucet.StoreKey,
+		params.StoreKey,
+		evm.StoreKey,
 	)
 
-	tkeys := sdk.NewTransientStoreKeys(params.TStoreKey)
+	tKeys := sdk.NewTransientStoreKeys(params.TStoreKey)
 
-	app := &App{
+	app := &NewApp{
 		BaseApp:        bApp,
 		cdc:            cdc,
 		invCheckPeriod: invCheckPeriod,
 		keys:           keys,
-		tkeys:          tkeys,
+		tKeys:          tKeys,
 		subspaces:      make(map[string]params.Subspace),
 	}
 
 	// init params keeper and subspaces
-	app.ParamsKeeper = params.NewKeeper(cdc, keys[params.StoreKey], tkeys[params.TStoreKey])
-	app.subspaces[auth.ModuleName] = app.ParamsKeeper.Subspace(auth.DefaultParamspace)
-	app.subspaces[bank.ModuleName] = app.ParamsKeeper.Subspace(bank.DefaultParamspace)
-	app.subspaces[staking.ModuleName] = app.ParamsKeeper.Subspace(staking.DefaultParamspace)
-	app.subspaces[mint.ModuleName] = app.ParamsKeeper.Subspace(mint.DefaultParamspace)
-	app.subspaces[distr.ModuleName] = app.ParamsKeeper.Subspace(distr.DefaultParamspace)
-	app.subspaces[slashing.ModuleName] = app.ParamsKeeper.Subspace(slashing.DefaultParamspace)
-	app.subspaces[gov.ModuleName] = app.ParamsKeeper.Subspace(gov.DefaultParamspace).WithKeyTable(gov.ParamKeyTable())
-	app.subspaces[crisis.ModuleName] = app.ParamsKeeper.Subspace(crisis.DefaultParamspace)
-	app.subspaces[evidence.ModuleName] = app.ParamsKeeper.Subspace(evidence.DefaultParamspace)
-	app.subspaces[evm.ModuleName] = app.ParamsKeeper.Subspace(evm.DefaultParamspace)
+	app.paramsKeeper = params.NewKeeper(cdc, keys[params.StoreKey], tKeys[params.TStoreKey])
+	app.subspaces[auth.ModuleName] = app.paramsKeeper.Subspace(auth.DefaultParamspace)
+	app.subspaces[bank.ModuleName] = app.paramsKeeper.Subspace(bank.DefaultParamspace)
+	app.subspaces[staking.ModuleName] = app.paramsKeeper.Subspace(staking.DefaultParamspace)
+	app.subspaces[mint.ModuleName] = app.paramsKeeper.Subspace(mint.DefaultParamspace)
+	app.subspaces[distr.ModuleName] = app.paramsKeeper.Subspace(distr.DefaultParamspace)
+	app.subspaces[slashing.ModuleName] = app.paramsKeeper.Subspace(slashing.DefaultParamspace)
+	app.subspaces[evm.ModuleName] = app.paramsKeeper.Subspace(evm.DefaultParamspace)
 
 	// use custom Chain account for contracts
-	app.AccountKeeper = auth.NewAccountKeeper(
+	app.accountKeeper = auth.NewAccountKeeper(
 		cdc, keys[auth.StoreKey], app.subspaces[auth.ModuleName], ethermint.ProtoAccount,
 	)
-	app.BankKeeper = bank.NewBaseKeeper(
-		app.AccountKeeper, app.subspaces[bank.ModuleName], app.BlacklistedAccAddrs(),
+	app.bankKeeper = bank.NewBaseKeeper(
+		app.accountKeeper, app.subspaces[bank.ModuleName], app.BlacklistedAccAddrs(),
 	)
-	app.SupplyKeeper = supply.NewKeeper(
-		cdc, keys[supply.StoreKey], app.AccountKeeper, app.BankKeeper, maccPerms,
+	app.supplyKeeper = supply.NewKeeper(
+		cdc, keys[supply.StoreKey], app.accountKeeper, app.bankKeeper, maccPerms,
 	)
 	stakingKeeper := staking.NewKeeper(
-		cdc, keys[staking.StoreKey], app.SupplyKeeper, app.subspaces[staking.ModuleName],
+		cdc, keys[staking.StoreKey], app.supplyKeeper, app.subspaces[staking.ModuleName],
 	)
 	app.MintKeeper = mint.NewKeeper(
 		cdc, keys[mint.StoreKey], app.subspaces[mint.ModuleName], &stakingKeeper,
-		app.SupplyKeeper, auth.FeeCollectorName,
+		app.supplyKeeper, auth.FeeCollectorName,
 	)
 	app.DistrKeeper = distr.NewKeeper(
 		cdc, keys[distr.StoreKey], app.subspaces[distr.ModuleName], &stakingKeeper,
-		app.SupplyKeeper, auth.FeeCollectorName, app.ModuleAccountAddrs(),
+		app.supplyKeeper, auth.FeeCollectorName, app.ModuleAccountAddrs(),
 	)
-	app.SlashingKeeper = slashing.NewKeeper(
+	app.slashingKeeper = slashing.NewKeeper(
 		cdc, keys[slashing.StoreKey], &stakingKeeper, app.subspaces[slashing.ModuleName],
 	)
-	app.CrisisKeeper = crisis.NewKeeper(
-		app.subspaces[crisis.ModuleName], invCheckPeriod, app.SupplyKeeper, auth.FeeCollectorName,
-	)
+
 	app.EvmKeeper = evm.NewKeeper(
-		app.cdc, keys[evm.StoreKey], app.subspaces[evm.ModuleName], app.AccountKeeper,
-	)
-	app.UpgradeKeeper = upgrade.NewKeeper(
-		skipUpgradeHeights, keys[upgrade.StoreKey], app.cdc,
-	)
-	app.FaucetKeeper = faucet.NewKeeper(
-		app.cdc, keys[faucet.StoreKey], app.SupplyKeeper,
-	)
-
-	// create evidence keeper with router
-	evidenceKeeper := evidence.NewKeeper(
-		cdc, keys[evidence.StoreKey], app.subspaces[evidence.ModuleName], &app.StakingKeeper, app.SlashingKeeper,
-	)
-	evidenceRouter := evidence.NewRouter()
-	// TODO: Register evidence routes.
-	evidenceKeeper.SetRouter(evidenceRouter)
-	app.EvidenceKeeper = *evidenceKeeper
-
-	// register the proposal types
-	govRouter := gov.NewRouter()
-	govRouter.AddRoute(gov.RouterKey, gov.ProposalHandler).
-		AddRoute(params.RouterKey, params.NewParamChangeProposalHandler(app.ParamsKeeper)).
-		AddRoute(distr.RouterKey, distr.NewCommunityPoolSpendProposalHandler(app.DistrKeeper)).
-		AddRoute(upgrade.RouterKey, upgrade.NewSoftwareUpgradeProposalHandler(app.UpgradeKeeper))
-
-	app.GovKeeper = gov.NewKeeper(
-		cdc, keys[gov.StoreKey], app.subspaces[gov.ModuleName], app.SupplyKeeper,
-		&stakingKeeper, govRouter,
+		app.cdc, keys[evm.StoreKey], app.subspaces[evm.ModuleName], app.accountKeeper,
 	)
 
 	// register the staking hooks
 	// NOTE: stakingKeeper above is passed by reference, so that it will contain these hooks
-	app.StakingKeeper = *stakingKeeper.SetHooks(
-		staking.NewMultiStakingHooks(app.DistrKeeper.Hooks(), app.SlashingKeeper.Hooks()),
+	app.stakingKeeper = *stakingKeeper.SetHooks(
+		staking.NewMultiStakingHooks(app.DistrKeeper.Hooks(), app.slashingKeeper.Hooks()),
 	)
 
 	// NOTE: Any module instantiated in the module manager that is later modified
 	// must be passed by reference here.
 	app.mm = module.NewManager(
-		genutil.NewAppModule(app.AccountKeeper, app.StakingKeeper, app.BaseApp.DeliverTx),
-		auth.NewAppModule(app.AccountKeeper),
-		bank.NewAppModule(app.BankKeeper, app.AccountKeeper),
-		crisis.NewAppModule(&app.CrisisKeeper),
-		supply.NewAppModule(app.SupplyKeeper, app.AccountKeeper),
-		gov.NewAppModule(app.GovKeeper, app.AccountKeeper, app.SupplyKeeper),
+		genutil.NewAppModule(app.accountKeeper, app.stakingKeeper, app.BaseApp.DeliverTx),
+		auth.NewAppModule(app.accountKeeper),
+		bank.NewAppModule(app.bankKeeper, app.accountKeeper),
+		supply.NewAppModule(app.supplyKeeper, app.accountKeeper),
 		mint.NewAppModule(app.MintKeeper),
-		slashing.NewAppModule(app.SlashingKeeper, app.AccountKeeper, app.StakingKeeper),
-		distr.NewAppModule(app.DistrKeeper, app.AccountKeeper, app.SupplyKeeper, app.StakingKeeper),
-		staking.NewAppModule(app.StakingKeeper, app.AccountKeeper, app.SupplyKeeper),
-		evidence.NewAppModule(app.EvidenceKeeper),
-		evm.NewAppModule(app.EvmKeeper, app.AccountKeeper),
-		faucet.NewAppModule(app.FaucetKeeper),
+		slashing.NewAppModule(app.slashingKeeper, app.accountKeeper, app.stakingKeeper),
+		distr.NewAppModule(app.DistrKeeper, app.accountKeeper, app.supplyKeeper, app.stakingKeeper),
+		staking.NewAppModule(app.stakingKeeper, app.accountKeeper, app.supplyKeeper),
+		evm.NewAppModule(app.EvmKeeper, app.accountKeeper),
 	)
 
 	// During begin block slashing happens after distr.BeginBlocker so that
@@ -272,50 +214,29 @@ func NewApp(
 	// CanWithdrawInvariant invariant.
 	app.mm.SetOrderBeginBlockers(
 		evm.ModuleName, mint.ModuleName, distr.ModuleName, slashing.ModuleName,
-		evidence.ModuleName,
 	)
 	app.mm.SetOrderEndBlockers(
-		evm.ModuleName, crisis.ModuleName, gov.ModuleName, staking.ModuleName,
+		evm.ModuleName, staking.ModuleName,
 	)
 
 	// NOTE: The genutils module must occur after staking so that pools are
 	// properly initialized with tokens from genesis accounts.
 	app.mm.SetOrderInitGenesis(
 		auth.ModuleName, distr.ModuleName, staking.ModuleName, bank.ModuleName,
-		slashing.ModuleName, gov.ModuleName, mint.ModuleName, supply.ModuleName,
-		crisis.ModuleName, genutil.ModuleName, evidence.ModuleName, evm.ModuleName,
-		faucet.ModuleName,
+		slashing.ModuleName, mint.ModuleName, supply.ModuleName,
+		genutil.ModuleName, evm.ModuleName,
 	)
 
-	app.mm.RegisterInvariants(&app.CrisisKeeper)
 	app.mm.RegisterRoutes(app.Router(), app.QueryRouter())
-
-	// create the simulation manager and define the order of the modules for deterministic simulations
-	//
-	// NOTE: this is not required apps that don't use the simulator for fuzz testing
-	// transactions
-	app.sm = module.NewSimulationManager(
-		auth.NewAppModule(app.AccountKeeper),
-		bank.NewAppModule(app.BankKeeper, app.AccountKeeper),
-		supply.NewAppModule(app.SupplyKeeper, app.AccountKeeper),
-		gov.NewAppModule(app.GovKeeper, app.AccountKeeper, app.SupplyKeeper),
-		mint.NewAppModule(app.MintKeeper),
-		staking.NewAppModule(app.StakingKeeper, app.AccountKeeper, app.SupplyKeeper),
-		distr.NewAppModule(app.DistrKeeper, app.AccountKeeper, app.SupplyKeeper, app.StakingKeeper),
-		slashing.NewAppModule(app.SlashingKeeper, app.AccountKeeper, app.StakingKeeper),
-		params.NewAppModule(), // NOTE: only used for simulation to generate randomized param change proposals
-	)
-
-	app.sm.RegisterStoreDecoders()
 
 	// initialize stores
 	app.MountKVStores(keys)
-	app.MountTransientStores(tkeys)
+	app.MountTransientStores(tKeys)
 
 	// initialize BaseApp
 	app.SetInitChainer(app.InitChainer)
 	app.SetBeginBlocker(app.BeginBlocker)
-	app.SetAnteHandler(ante.NewAnteHandler(app.AccountKeeper, app.EvmKeeper, app.SupplyKeeper))
+	app.SetAnteHandler(ante.NewAnteHandler(app.accountKeeper, app.EvmKeeper, app.supplyKeeper))
 	app.SetEndBlocker(app.EndBlocker)
 
 	if loadLatest {
@@ -329,32 +250,32 @@ func NewApp(
 }
 
 // Name returns the name of the App
-func (app *App) Name() string { return app.BaseApp.Name() }
+func (app *NewApp) Name() string { return app.BaseApp.Name() }
 
 // BeginBlocker updates every begin block
-func (app *App) BeginBlocker(ctx sdk.Context, req abci.RequestBeginBlock) abci.ResponseBeginBlock {
+func (app *NewApp) BeginBlocker(ctx sdk.Context, req abci.RequestBeginBlock) abci.ResponseBeginBlock {
 	return app.mm.BeginBlock(ctx, req)
 }
 
 // EndBlocker updates every end block
-func (app *App) EndBlocker(ctx sdk.Context, req abci.RequestEndBlock) abci.ResponseEndBlock {
+func (app *NewApp) EndBlocker(ctx sdk.Context, req abci.RequestEndBlock) abci.ResponseEndBlock {
 	return app.mm.EndBlock(ctx, req)
 }
 
 // InitChainer updates at chain initialization
-func (app *App) InitChainer(ctx sdk.Context, req abci.RequestInitChain) abci.ResponseInitChain {
+func (app *NewApp) InitChainer(ctx sdk.Context, req abci.RequestInitChain) abci.ResponseInitChain {
 	var genesisState simapp.GenesisState
 	app.cdc.MustUnmarshalJSON(req.AppStateBytes, &genesisState)
 	return app.mm.InitGenesis(ctx, genesisState)
 }
 
 // LoadHeight loads state at a particular height
-func (app *App) LoadHeight(height int64) error {
+func (app *NewApp) LoadHeight(height int64) error {
 	return app.LoadVersion(height, app.keys[bam.MainStoreKey])
 }
 
 // ModuleAccountAddrs returns all the app's module account addresses.
-func (app *App) ModuleAccountAddrs() map[string]bool {
+func (app *NewApp) ModuleAccountAddrs() map[string]bool {
 	modAccAddrs := make(map[string]bool)
 	for acc := range maccPerms {
 		modAccAddrs[supply.NewModuleAddress(acc).String()] = true
@@ -364,7 +285,7 @@ func (app *App) ModuleAccountAddrs() map[string]bool {
 }
 
 // BlacklistedAccAddrs returns all the app's module account addresses black listed for receiving tokens.
-func (app *App) BlacklistedAccAddrs() map[string]bool {
+func (app *NewApp) BlacklistedAccAddrs() map[string]bool {
 	blacklistedAddrs := make(map[string]bool)
 	for acc := range maccPerms {
 		blacklistedAddrs[supply.NewModuleAddress(acc).String()] = !allowedReceivingModAcc[acc]
@@ -374,14 +295,14 @@ func (app *App) BlacklistedAccAddrs() map[string]bool {
 }
 
 // SimulationManager implements the SimulationApp interface
-func (app *App) SimulationManager() *module.SimulationManager {
+func (app *NewApp) SimulationManager() *module.SimulationManager {
 	return app.sm
 }
 
 // GetKey returns the KVStoreKey for the provided store key.
 //
 // NOTE: This is solely to be used for testing purposes.
-func (app *App) GetKey(storeKey string) *sdk.KVStoreKey {
+func (app *NewApp) GetKey(storeKey string) *sdk.KVStoreKey {
 	return app.keys[storeKey]
 }
 
@@ -389,7 +310,7 @@ func (app *App) GetKey(storeKey string) *sdk.KVStoreKey {
 //
 // NOTE: This is solely to be used for testing purposes as it may be desirable
 // for modules to register their own custom testing types.
-func (app *App) Codec() *codec.Codec {
+func (app *NewApp) Codec() *codec.Codec {
 	return app.cdc
 }
 
