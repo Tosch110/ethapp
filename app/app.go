@@ -19,7 +19,6 @@ import (
 	"github.com/cosmos/cosmos-sdk/x/slashing"
 	"github.com/cosmos/cosmos-sdk/x/staking"
 	"github.com/cosmos/cosmos-sdk/x/supply"
-	"github.com/cosmos/cosmos-sdk/x/upgrade"
 
 	"github.com/cosmos/ethermint/app/ante"
 	ethermintcodec "github.com/cosmos/ethermint/codec"
@@ -61,7 +60,6 @@ var (
 		distr.AppModuleBasic{},
 		params.AppModuleBasic{},
 		slashing.AppModuleBasic{},
-		upgrade.AppModuleBasic{},
 		evm.AppModuleBasic{},
 	)
 
@@ -106,7 +104,6 @@ type NewApp struct {
 	slashingKeeper slashing.Keeper
 	MintKeeper     mint.Keeper
 	DistrKeeper    distr.Keeper
-	UpgradeKeeper  upgrade.Keeper
 	ParamsKeeper   params.Keeper
 	EvmKeeper      evm.Keeper
 
@@ -124,7 +121,6 @@ func NewAppInit(
 	db dbm.DB,
 	traceStore io.Writer,
 	loadLatest bool,
-	skipUpgradeHeights map[int64]bool,
 	invCheckPeriod uint,
 	baseAppOptions ...func(*bam.BaseApp),
 ) *NewApp {
@@ -139,7 +135,7 @@ func NewAppInit(
 	keys := sdk.NewKVStoreKeys(
 		bam.MainStoreKey, auth.StoreKey, staking.StoreKey,
 		supply.StoreKey, mint.StoreKey, distr.StoreKey, slashing.StoreKey,
-		params.StoreKey, upgrade.StoreKey,
+		params.StoreKey,
 		evm.StoreKey,
 	)
 
@@ -191,9 +187,6 @@ func NewAppInit(
 
 	app.EvmKeeper = evm.NewKeeper(
 		app.cdc, keys[evm.StoreKey], app.subspaces[evm.ModuleName], app.accountKeeper,
-	)
-	app.UpgradeKeeper = upgrade.NewKeeper(
-		skipUpgradeHeights, keys[upgrade.StoreKey], app.cdc,
 	)
 
 	// register the staking hooks
