@@ -2,10 +2,11 @@
 # Quick start
 
 ```
-starport serve --verbose
+make install
+./init.sh
 ethappd start
 # in a new terminal window
-ethappcli rest-server --laddr "tcp://localhost:8545" --trace --chain-id 0 --unlock-key user2
+ethappcli rest-server --laddr "tcp://localhost:8545" --trace --chain-id ethapp-1 --unlock-key me
 ```
 
 
